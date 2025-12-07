@@ -143,32 +143,47 @@ def build_molecule(head, tail_code, s3, s4, s5):
     return mol
 
 def mol_to_image(mol):
-    """Tạo ảnh SVG với highlight màu"""
-    # Create highlight maps
-    highlight_atoms = {}
+    """Tạo ảnh SVG với highlight màu - Đã sửa lỗi Type List/Tuple"""
+    
+    # 1. Chuẩn bị dữ liệu highlight
+    highlight_atoms_list = []   # Bắt buộc phải là LIST các index
+    highlight_atom_colors = {}  # Dictionary {index: color}
     
     for atom in mol.GetAtoms():
         if atom.HasProp("block_id"):
             tag = atom.GetIntProp("block_id")
-            highlight_atoms[atom.GetIdx()] = COLOR_MAP[tag]
+            idx = atom.GetIdx()
+            # Lấy màu từ COLOR_MAP
+            color = COLOR_MAP[tag]
             
-    # Draw
+            # Thêm vào danh sách và dict
+            highlight_atoms_list.append(idx)
+            highlight_atom_colors[idx] = color
+            
+    # 2. Thiết lập đối tượng vẽ
     d2d = rdMolDraw2D.MolDraw2DSVG(600, 400)
     d2d.drawOptions().addAtomIndices = False
     d2d.drawOptions().bondLineWidth = 2
     
-    # Sanitize & Compute Coordinates
+    # 3. Xử lý hóa học (Sanitize & Coordinates)
     try:
         Chem.SanitizeMol(mol)
         Chem.Compute2DCoords(mol)
         try:
             Chem.Kekulize(mol)
         except:
-            pass # Sometimes aromaticity fails in display, visually usually ok
-    except:
-        pass
+            pass 
+    except Exception as e:
+        print(f"Sanitize error: {e}")
 
-    d2d.DrawMoleculeWithHighlights(mol, "Molecule", dict(highlight_atoms), {}, {}, {})
+    # 4. Vẽ (Sử dụng DrawMolecule thay vì DrawMoleculeWithHighlights)
+    # Lưu ý: highlightAtoms bắt buộc phải là list
+    d2d.DrawMolecule(
+        mol,
+        highlightAtoms=highlight_atoms_list, 
+        highlightAtomColors=highlight_atom_colors
+    )
+    
     d2d.FinishDrawing()
     return d2d.GetDrawingText()
 
