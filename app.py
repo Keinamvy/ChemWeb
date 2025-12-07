@@ -257,9 +257,6 @@ with col2:
         <span style="color:#1f77b4; font-weight:bold;">■ Core (Head)</span>: Phần khung dị vòng
     </div>
     <div style="margin-bottom:10px;">
-        <span style="color:black; font-weight:bold; border:1px solid #ccc; padding: 0 4px;">■ Benzene Ring</span>: Vòng gắn Subs (Không tô màu)
-    </div>
-    <div style="margin-bottom:10px;">
         <span style="color:#800080; font-weight:bold;">■ Tail</span>: Nhóm đuôi tím
     </div>
     <div style="margin-bottom:10px;">
