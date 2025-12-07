@@ -1,61 +1,36 @@
 import streamlit as st
 from rdkit import Chem
 from rdkit.Chem import Draw
-from rdkit.Chem import AllChem
+from rdkit.Chem.Draw import rdMolDraw2D
+import random
 
-# --- CẤU HÌNH TRANG ---
-st.set_page_config(page_title="Chemical Block Configurator", layout="wide")
-# Ẩn menu hamburger và footer mặc định của Streamlit để giao diện sạch hơn
-hide_streamlit_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+# ==========================================
+# 1. DATA DEFINITIONS (Taken from TestSetGen.py)
+# ==========================================
 
-st.title("🧪 Chemical Building Block Configurator")
-st.markdown("Công cụ trực quan hóa cấu trúc phân tử dựa trên các mảnh ghép (Fragments).")
-
-# --- DỮ LIỆU ĐẦU VÀO (TỪ CODE GỐC) ---
-
-# Block III tails (gắn tại [*:9])
 TAIL_FRAGS = {
-    "1a": ("[*:9]CC=C", "Allyl"),
-    "1b": ("[*:9]CCCO", "3-hydroxypropyl"),
-    "1c": ("[*:9]C=CC", "Propenyl"),
-    "1d": ("[*:9]C(O)CC", "2-hydroxypropyl"),
-    "2a": ("[*:9]Cc1ccccc1", "Benzyl"),
-    "2b": ("[*:9]Cc1c(C)cccc1", "2-methyl"),
-    "2c": ("[*:9]Cc1cc(C)ccc1", "3-methyl"),
-    "2d": ("[*:9]Cc1ccc(C)cc1", "4-methyl"),
-    "2e": ("[*:9]Cc1c(OC)cccc1", "2-methoxy"),
-    "2f": ("[*:9]Cc1cc(OC)ccc1", "3-methoxy"),
-    "2g": ("[*:9]Cc1ccc(OC)cc1", "4-methoxy"),
-    "2h": ("[*:9]Cc1c(N(C)C)cccc1", "2-amine (NMe2)"),
-    "2i": ("[*:9]Cc1cc(N(C)C)ccc1", "3-amine"),
-    "2j": ("[*:9]Cc1ccc(N(C)C)cc1", "4-amine"),
+    "1a": "[*]CC=C",             # allyl
+    "1b": "[*]CCCO",             # 3-hydroxypropyl
+    "1c": "[*]C=CC",             # propenyl
+    "1d": "[*]C(O)CC",           # 2-hydroxypropyl
+    "2a": "[*]Cc1ccccc1",        # benzyl
+    "2b": "[*]Cc1c(C)cccc1",     # 2-methyl
+    "2c": "[*]Cc1cc(C)ccc1",     # 3-methyl
+    "2d": "[*]Cc1ccc(C)cc1",     # 4-methyl
+    "2e": "[*]Cc1c(OC)cccc1",    # 2-methoxy
+    "2f": "[*]Cc1cc(OC)ccc1",    # 3-methoxy
+    "2g": "[*]Cc1ccc(OC)cc1",    # 4-methoxy
+    "2h": "[*]Cc1c(N(C)C)cccc1", # 2-amine (NMe2)
+    "2i": "[*]Cc1cc(N(C)C)ccc1", # 3-amine
+    "2j": "[*]Cc1ccc(N(C)C)cc1", # 4-amine
 }
 
-# Block II substituents (3/4/5)
 SUB_FRAGS = {
-    "a": ("[*]H", "Hydrogen (H)"),
-    "b": ("[*]O", "Hydroxy (-OH)"),
-    "c": ("[*]S", "Thiol (-SH)"),
-    "d": ("[*]OC", "Methoxy (-OMe)"),
-    "e": ("[*]OC(F)(F)F", "-OCF3"),
-    "f": ("[*]SC", "-SMe"),
-    "g": ("[*]N(C)C", "-NMe2"),
-    "h": ("[*]C=O", "Formyl (-CHO)"),
-    "i": ("[*]C(C)=O", "Acetyl (-Ac)"),
-    "j": ("[*]F", "Fluoro (-F)"),
-    "k": ("[*]CF", "-CH2F (Giả định)"), 
-    "l": ("[*]C(F)F", "-CHF2"),
-    "m": ("[*]C(F)(F)F", "-CF3"),
-    "n": ("[*]C", "Methyl (-Me)"),
+    "a": "[*]H", "b": "[*]O", "c": "[*]S", "d": "[*]OC", "e": "[*]OC(F)(F)F",
+    "f": "[*]SC", "g": "[*]N(C)C", "h": "[*]C=O", "i": "[*]C(C)=O", "j": "[*]F",
+    "k": "[*]CF", "l": "[*]C(F)F", "m": "[*]C(F)(F)F", "n": "[*]C",
 }
 
-# Core cho O/S/N/M
 CORES = {
     "O": "[*:9]c1ccc2c(C=C(c3cc([*:3])c([*:4])c([*:5])c3)O2)c1",
     "S": "[*:9]c1ccc2c(C=C(c3cc([*:3])c([*:4])c([*:5])c3)S2)c1",
@@ -63,168 +38,232 @@ CORES = {
     "M": "[*:9]c1ccc2c(C=C(c3cc([*:3])c([*:4])c([*:5])c3)N2C)c1",
 }
 
-# --- HÀM XỬ LÝ RDKIT ---
+# Mapping colors for visualization (RGB)
+# Core: Blue, Tail: Purple, Sub: Orange
+COLOR_MAP = {
+    0: (0.1, 0.4, 0.6),  # Core - Blue-ish
+    1: (0.5, 0.0, 0.5),  # Tail - Purple
+    2: (1.0, 0.5, 0.0)   # Sub - Orange
+}
 
-def attach_fragment(core: Chem.Mol, label: int, frag_smiles: str) -> Chem.Mol:
-    """Gắn 1 fragment vào nhãn [*:label] trên core."""
-    core = Chem.Mol(core) 
+# ==========================================
+# 2. HELPER FUNCTIONS
+# ==========================================
+
+def tag_atoms(mol, tag_id):
+    """Gán thẻ (tag) cho tất cả các atom trong mol để tô màu sau này."""
+    for atom in mol.GetAtoms():
+        # Tag 0: Core, 1: Tail, 2: Subs
+        atom.SetIntProp("block_id", tag_id)
+    return mol
+
+def attach_fragment_tagged(core_mol: Chem.Mol, label: int, frag_smiles: str, tag_id: int) -> Chem.Mol:
+    """
+    Phiên bản sửa đổi của attach_fragment để hỗ trợ tô màu.
+    Nó gán tag cho fragment trước khi gắn vào core.
+    """
+    # 1. Prepare Core (Keep existing properties)
+    core = Chem.Mol(core_mol)
+    
+    # 2. Find dummy on core
     idx_dummy = None
     for a in core.GetAtoms():
         if a.GetAtomicNum() == 0 and a.HasProp("molAtomMapNumber") and int(a.GetProp("molAtomMapNumber")) == label:
             idx_dummy = a.GetIdx(); break
-    
-    if idx_dummy is None: return core
+    if idx_dummy is None:
+        raise ValueError(f"Core missing [*:{label}]")
 
     nbrs = [n.GetIdx() for n in core.GetAtomWithIdx(idx_dummy).GetNeighbors()]
-    if len(nbrs) != 1: return core
     idx_core_attach = nbrs[0]
 
-    real_smiles = frag_smiles if isinstance(frag_smiles, str) else frag_smiles
-    frag = Chem.MolFromSmiles(real_smiles)
-    if frag is None: return core
+    # 3. Prepare Fragment and Tag it
+    frag = Chem.MolFromSmiles(frag_smiles)
+    if frag is None: return core # Fail safe
     
-    idx_fd_list = [a.GetIdx() for a in frag.GetAtoms() if a.GetAtomicNum() == 0]
-    if not idx_fd_list: return core
-    idx_fd = idx_fd_list[0]
-    
+    # Tag atoms of the fragment
+    tag_atoms(frag, tag_id)
+
+    # Find dummy in fragment
+    idx_fd = [a.GetIdx() for a in frag.GetAtoms() if a.GetAtomicNum() == 0][0]
     fnbr = [n.GetIdx() for n in frag.GetAtomWithIdx(idx_fd).GetNeighbors()]
-    if len(fnbr) != 1: return core
     idx_fa = fnbr[0]
 
+    # 4. Combine
     combo = Chem.CombineMols(core, frag)
     cn = core.GetNumAtoms()
+    
     em = Chem.EditableMol(combo)
     em.AddBond(idx_core_attach, cn + idx_fa, order=Chem.rdchem.BondType.SINGLE)
     
+    # Remove dummies
     for ridx in sorted([cn + idx_fd, idx_dummy], reverse=True):
         em.RemoveAtom(ridx)
-    
+        
     m = em.GetMol()
-    try: Chem.SanitizeMol(m)
-    except: pass
+    try:
+        Chem.SanitizeMol(m)
+    except:
+        pass # Handle tricky valence cases gracefully
     return m
 
 def remove_dummy_label(mol, label):
-    """Xóa dummy atom có label cụ thể (dùng cho Hydro 'a')"""
+    """Xóa dummy atom nếu nhóm thế là 'a' (Hydro)"""
     idx = None
     for a in mol.GetAtoms():
         if a.GetAtomicNum() == 0 and a.HasProp("molAtomMapNumber") and int(a.GetProp("molAtomMapNumber")) == label:
             idx = a.GetIdx(); break
-    
     if idx is not None:
         em = Chem.EditableMol(mol)
         em.RemoveAtom(idx)
         m = em.GetMol()
-        try: Chem.SanitizeMol(m)
-        except: pass
+        Chem.SanitizeMol(m)
         return m
     return mol
 
-# --- GIAO DIỆN NGƯỜI DÙNG (SIDEBAR) ---
+def build_molecule(head, tail_code, s3, s4, s5):
+    # 1. Start with Core (Tag 0)
+    core_smi = CORES[head]
+    mol = Chem.MolFromSmiles(core_smi)
+    tag_atoms(mol, 0) # Tag core atoms as 0
 
-st.sidebar.header("⚙️ Cấu hình Building Blocks")
+    # 2. Attach Tail (Tag 1)
+    tail_frag = TAIL_FRAGS[tail_code]
+    mol = attach_fragment_tagged(mol, 9, tail_frag, 1)
 
-# 1. Chọn Core (Head) - Màu Xanh
-selected_head = st.sidebar.selectbox("1. Chọn Head (Lõi) [N]", list(CORES.keys()), index=2, format_func=lambda x: f"Head {x}")
+    # 3. Attach Substituents (Tag 2)
+    subs = [(3, s3), (4, s4), (5, s5)]
+    for lab, sub_code in subs:
+        if sub_code == "a":
+            # Nếu là 'a', chỉ xóa dummy, không thêm atom mới nên không cần highlight
+            mol = remove_dummy_label(mol, lab)
+        else:
+            sub_frag = SUB_FRAGS[sub_code]
+            mol = attach_fragment_tagged(mol, lab, sub_frag, 2)
+    
+    return mol
 
-# 2. Chọn Tail (Block III) - Màu Tím
-tail_options = list(TAIL_FRAGS.keys())
-selected_tail = st.sidebar.selectbox(
-    "2. Chọn Tail (Nhóm thế) [2h...]", 
-    tail_options, 
-    index=tail_options.index("2h"),
-    format_func=lambda x: f"{x}: {TAIL_FRAGS[x][1]}"
-)
+def mol_to_image(mol):
+    """Tạo ảnh SVG với highlight màu"""
+    # Create highlight maps
+    highlight_atoms = {}
+    
+    for atom in mol.GetAtoms():
+        if atom.HasProp("block_id"):
+            tag = atom.GetIntProp("block_id")
+            highlight_atoms[atom.GetIdx()] = COLOR_MAP[tag]
+            
+    # Draw
+    d2d = rdMolDraw2D.MolDraw2DSVG(600, 400)
+    d2d.drawOptions().addAtomIndices = False
+    d2d.drawOptions().bondLineWidth = 2
+    
+    # Sanitize & Compute Coordinates
+    try:
+        Chem.SanitizeMol(mol)
+        Chem.Compute2DCoords(mol)
+        try:
+            Chem.Kekulize(mol)
+        except:
+            pass # Sometimes aromaticity fails in display, visually usually ok
+    except:
+        pass
 
-# 3. Chọn Substituents (Block II) - Màu Cam
+    d2d.DrawMoleculeWithHighlights(mol, "Molecule", dict(highlight_atoms), {}, {}, {})
+    d2d.FinishDrawing()
+    return d2d.GetDrawingText()
+
+# ==========================================
+# 3. STREAMLIT APP UI
+# ==========================================
+
+st.set_page_config(page_title="Chemical Block Builder", layout="wide")
+
+st.title("🧩 Chemical Building Block Assembler")
+st.markdown("Chọn các thành phần Head, Tail và Substituents để tạo cấu trúc hóa học. Các phần được tô màu tương ứng với vai trò của chúng.")
+
+# --- Sidebar Controls ---
+st.sidebar.header("Configuration")
+
+# Random Button Logic
+if 'random_trigger' not in st.session_state:
+    st.session_state.random_trigger = False
+
+def randomize():
+    st.session_state.head_val = random.choice(list(CORES.keys()))
+    st.session_state.tail_val = random.choice(list(TAIL_FRAGS.keys()))
+    st.session_state.s3_val = random.choice(list(SUB_FRAGS.keys()))
+    st.session_state.s4_val = random.choice(list(SUB_FRAGS.keys()))
+    st.session_state.s5_val = random.choice(list(SUB_FRAGS.keys()))
+
+st.sidebar.button("🎲 Random Structure", on_click=randomize)
+
+# Selections
+# Use session state to allow random button to update widgets
+head_sel = st.sidebar.selectbox("Head (Core - Blue)", list(CORES.keys()), key='head_val')
+tail_sel = st.sidebar.selectbox("Tail (Block III - Purple)", list(TAIL_FRAGS.keys()), key='tail_val')
+
 st.sidebar.markdown("---")
-st.sidebar.write("3. Chọn Substituents (Nhóm thế vòng) [3i4a5j]")
-sub_options = list(SUB_FRAGS.keys())
+st.sidebar.subheader("Substituents (Orange)")
+s3_sel = st.sidebar.selectbox("Pos 3", list(SUB_FRAGS.keys()), key='s3_val')
+s4_sel = st.sidebar.selectbox("Pos 4", list(SUB_FRAGS.keys()), key='s4_val')
+s5_sel = st.sidebar.selectbox("Pos 5", list(SUB_FRAGS.keys()), key='s5_val')
 
-col_sb1, col_sb2, col_sb3 = st.sidebar.columns(3)
-with col_sb1:
-    s3 = st.selectbox("Vị trí 3", sub_options, index=sub_options.index("i"), format_func=lambda x: x, key="s3")
-with col_sb2:
-    s4 = st.selectbox("Vị trí 4", sub_options, index=sub_options.index("a"), format_func=lambda x: x, key="s4")
-with col_sb3:
-    s5 = st.selectbox("Vị trí 5", sub_options, index=sub_options.index("j"), format_func=lambda x: x, key="s5")
-
-# --- XỬ LÝ LẮP RÁP PHÂN TỬ ---
-
-core_mol = Chem.MolFromSmiles(CORES[selected_head])
-tail_smiles = TAIL_FRAGS[selected_tail][0]
-current_mol = attach_fragment(core_mol, 9, tail_smiles)
-
-subs_to_attach = [(3, s3), (4, s4), (5, s5)]
-for label, code in subs_to_attach:
-    if code == "a":
-        current_mol = remove_dummy_label(current_mol, label)
-    else:
-        sub_smiles = SUB_FRAGS[code][0]
-        current_mol = attach_fragment(current_mol, label, sub_smiles)
-
-try:
-    Chem.SanitizeMol(current_mol)
-    AllChem.Compute2DCoords(current_mol)
-    final_smiles = Chem.MolToSmiles(current_mol, isomericSmiles=True)
-except Exception as e:
-    st.error(f"Lỗi khi tạo cấu trúc: {e}")
-    final_smiles = ""
-    current_mol = None
-
-# --- HIỂN THỊ KẾT QUẢ ---
+# --- Main Area ---
 
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("Kết quả cấu trúc")
-    if current_mol:
-        img = Draw.MolToImage(current_mol, size=(600, 450))
-        st.image(img, use_column_width=True)
-    else:
-        st.warning("Không thể tạo hình ảnh cấu trúc.")
-    
-with col2:
-    st.subheader("Thông tin chi tiết")
-    
-    # --- PHẦN MỚI: TẠO MÃ MÀU HIGHLIGHT ---
-    # Định nghĩa màu sắc (tương tự hình ảnh)
-    head_color = "#1f77b4" # Xanh dương
-    tail_color = "#9467bd" # Tím
-    sub_color = "#ff7f0e"  # Cam
-    # Màu nền nhạt tương ứng để làm highlight
-    head_bg = "#e6f2ff"
-    tail_bg = "#f2e6ff"
-    sub_bg = "#fff2e6"
-    
-    # Style chung cho các thẻ span
-    span_style = "padding: 4px 6px; border-radius: 6px; font-weight: 600; font-size: 1.3em;"
+    # Logic Generation
+    try:
+        final_mol = build_molecule(head_sel, tail_sel, s3_sel, s4_sel, s5_sel)
+        
+        # Generate Code String
+        code_str = f"{head_sel}{tail_sel}3{s3_sel}4{s4_sel}5{s5_sel}"
+        
+        st.subheader(f"Code: `{code_str}`")
+        
+        # Display SVG
+        svg = mol_to_image(final_mol)
+        st.image(svg, use_container_width=False)
+        
+        # Canonical Smiles
+        can_smi = Chem.MolToSmiles(final_mol, isomericSmiles=True)
+        with st.expander("Show Canonical SMILES"):
+            st.code(can_smi)
 
-    # Tạo chuỗi HTML với highlight
-    highlighted_code = (
-        f'<span style="background-color: {head_bg}; color: {head_color}; {span_style}">{selected_head}</span>'
-        f'<span style="background-color: {tail_bg}; color: {tail_color}; {span_style} margin-left: 4px;">{selected_tail}</span>'
-        f'<span style="background-color: {sub_bg}; color: {sub_color}; {span_style} margin-left: 4px;">3{s3}4{s4}5{s5}</span>'
+    except Exception as e:
+        st.error(f"Error constructing molecule: {e}")
+
+with col2:
+    st.markdown("### Legend")
+    
+    st.markdown(
+        """
+        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+            <div style="width: 20px; height: 20px; background-color: #1f77b4; margin-right: 10px; border-radius: 3px;"></div>
+            <span><b>Core (Head)</b><br>Khung chính (O/S/N/M)</span>
+        </div>
+        """, unsafe_allow_html=True
+    )
+    
+    st.markdown(
+        """
+        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+            <div style="width: 20px; height: 20px; background-color: #800080; margin-right: 10px; border-radius: 3px;"></div>
+            <span><b>Tail (Block III)</b><br>Nhóm gắn tại vị trí 9</span>
+        </div>
+        """, unsafe_allow_html=True
+    )
+    
+    st.markdown(
+        """
+        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+            <div style="width: 20px; height: 20px; background-color: #ff7f0e; margin-right: 10px; border-radius: 3px;"></div>
+            <span><b>Substituents</b><br>Nhóm thế tại vị trí 3, 4, 5</span>
+        </div>
+        """, unsafe_allow_html=True
     )
 
-    # Hiển thị bằng st.markdown với unsafe_allow_html=True
-    st.markdown(f"### Mã định danh:<br><div style='margin-top: 10px;'>{highlighted_code}</div>", unsafe_allow_html=True)
-    # ---------------------------------------
+    st.info("Lưu ý: Nếu chọn nhóm thế là 'a' (Hydrogen), nó được coi là ẩn (implicit H) và sẽ không được tô màu highlight.")
 
-    st.markdown("---")
-    st.write("**Thành phần:**")
-    # Sử dụng màu sắc tương ứng trong danh sách thành phần để đồng bộ
-    st.markdown(f"- **Head:** <span style='color:{head_color}; font-weight:bold;'>{selected_head}</span>", unsafe_allow_html=True)
-    st.markdown(f"- **Tail:** <span style='color:{tail_color}; font-weight:bold;'>{selected_tail}</span> ({TAIL_FRAGS[selected_tail][1]})", unsafe_allow_html=True)
-    st.markdown(f"- **Sub 3:** <span style='color:{sub_color}; font-weight:bold;'>{s3}</span> ({SUB_FRAGS[s3][1]})", unsafe_allow_html=True)
-    st.markdown(f"- **Sub 4:** <span style='color:{sub_color}; font-weight:bold;'>{s4}</span> ({SUB_FRAGS[s4][1]})", unsafe_allow_html=True)
-    st.markdown(f"- **Sub 5:** <span style='color:{sub_color}; font-weight:bold;'>{s5}</span> ({SUB_FRAGS[s5][1]})", unsafe_allow_html=True)
-    
-    st.markdown("---")
-    with st.expander("Xem SMILES"):
-        st.code(final_smiles, language="text")
 
-# --- KIỂM TRA QUY TẮC ---
-non_a_count = sum([1 for x in [s3, s4, s5] if x != "a"])
-if non_a_count > 2:
-    st.warning(f"⚠️ **Lưu ý:** Cấu hình này có {non_a_count} nhóm thế khác Hydro. Quy tắc gốc (Max2) chỉ cho phép tối đa 2.")
