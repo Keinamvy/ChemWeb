@@ -5,6 +5,14 @@ from rdkit.Chem import AllChem
 
 # --- CẤU HÌNH TRANG ---
 st.set_page_config(page_title="Chemical Block Configurator", layout="wide")
+# Ẩn menu hamburger và footer mặc định của Streamlit để giao diện sạch hơn
+hide_streamlit_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 st.title("🧪 Chemical Building Block Configurator")
 st.markdown("Công cụ trực quan hóa cấu trúc phân tử dựa trên các mảnh ghép (Fragments).")
@@ -41,7 +49,7 @@ SUB_FRAGS = {
     "h": ("[*]C=O", "Formyl (-CHO)"),
     "i": ("[*]C(C)=O", "Acetyl (-Ac)"),
     "j": ("[*]F", "Fluoro (-F)"),
-    "k": ("[*]CF", "-CH2F (Lỗi trong gốc? Giả định -CF)"), # Lưu ý: [*]CF có thể không hợp lệ hóa trị nếu không rõ ràng, giữ nguyên như input
+    "k": ("[*]CF", "-CH2F (Giả định)"), 
     "l": ("[*]C(F)F", "-CHF2"),
     "m": ("[*]C(F)(F)F", "-CF3"),
     "n": ("[*]C", "Methyl (-Me)"),
@@ -59,31 +67,22 @@ CORES = {
 
 def attach_fragment(core: Chem.Mol, label: int, frag_smiles: str) -> Chem.Mol:
     """Gắn 1 fragment vào nhãn [*:label] trên core."""
-    core = Chem.Mol(core) # Copy để không sửa core gốc
-    
-    # Tìm dummy trên core
+    core = Chem.Mol(core) 
     idx_dummy = None
     for a in core.GetAtoms():
         if a.GetAtomicNum() == 0 and a.HasProp("molAtomMapNumber") and int(a.GetProp("molAtomMapNumber")) == label:
             idx_dummy = a.GetIdx(); break
     
-    if idx_dummy is None:
-        # Nếu không tìm thấy label (có thể đã bị xóa hoặc lỗi), trả về core hiện tại
-        return core
+    if idx_dummy is None: return core
 
-    # Nút trên core để nối
     nbrs = [n.GetIdx() for n in core.GetAtomWithIdx(idx_dummy).GetNeighbors()]
-    if len(nbrs) != 1: return core # Lỗi cấu trúc
+    if len(nbrs) != 1: return core
     idx_core_attach = nbrs[0]
 
-    # Xử lý Fragment
-    # Lưu ý: frag_smiles trong dict của app này là tuple (smiles, desc), lấy smiles
     real_smiles = frag_smiles if isinstance(frag_smiles, str) else frag_smiles
-    
     frag = Chem.MolFromSmiles(real_smiles)
     if frag is None: return core
     
-    # Tìm dummy trong fragment
     idx_fd_list = [a.GetIdx() for a in frag.GetAtoms() if a.GetAtomicNum() == 0]
     if not idx_fd_list: return core
     idx_fd = idx_fd_list[0]
@@ -97,19 +96,16 @@ def attach_fragment(core: Chem.Mol, label: int, frag_smiles: str) -> Chem.Mol:
     em = Chem.EditableMol(combo)
     em.AddBond(idx_core_attach, cn + idx_fa, order=Chem.rdchem.BondType.SINGLE)
     
-    # Xóa 2 dummy (xóa index lớn trước)
     for ridx in sorted([cn + idx_fd, idx_dummy], reverse=True):
         em.RemoveAtom(ridx)
     
     m = em.GetMol()
-    try:
-        Chem.SanitizeMol(m)
-    except:
-        pass # Bỏ qua lỗi sanitize tạm thời để hiển thị
+    try: Chem.SanitizeMol(m)
+    except: pass
     return m
 
 def remove_dummy_label(mol, label):
-    """Xóa dummy atom có label cụ thể (dùng cho trường hợp Hydro 'a')"""
+    """Xóa dummy atom có label cụ thể (dùng cho Hydro 'a')"""
     idx = None
     for a in mol.GetAtoms():
         if a.GetAtomicNum() == 0 and a.HasProp("molAtomMapNumber") and int(a.GetProp("molAtomMapNumber")) == label:
@@ -119,10 +115,8 @@ def remove_dummy_label(mol, label):
         em = Chem.EditableMol(mol)
         em.RemoveAtom(idx)
         m = em.GetMol()
-        try:
-            Chem.SanitizeMol(m)
-        except:
-            pass
+        try: Chem.SanitizeMol(m)
+        except: pass
         return m
     return mol
 
@@ -130,54 +124,45 @@ def remove_dummy_label(mol, label):
 
 st.sidebar.header("⚙️ Cấu hình Building Blocks")
 
-# 1. Chọn Core (Head)
-selected_head = st.sidebar.selectbox("1. Chọn Head (Lõi)", list(CORES.keys()), index=2, format_func=lambda x: f"Head {x}")
+# 1. Chọn Core (Head) - Màu Xanh
+selected_head = st.sidebar.selectbox("1. Chọn Head (Lõi) [N]", list(CORES.keys()), index=2, format_func=lambda x: f"Head {x}")
 
-# 2. Chọn Tail (Block III)
+# 2. Chọn Tail (Block III) - Màu Tím
 tail_options = list(TAIL_FRAGS.keys())
 selected_tail = st.sidebar.selectbox(
-    "2. Chọn Tail (Nhóm thế N)", 
+    "2. Chọn Tail (Nhóm thế) [2h...]", 
     tail_options, 
     index=tail_options.index("2h"),
     format_func=lambda x: f"{x}: {TAIL_FRAGS[x][1]}"
 )
 
-# 3. Chọn Substituents (Block II)
+# 3. Chọn Substituents (Block II) - Màu Cam
+st.sidebar.markdown("---")
+st.sidebar.write("3. Chọn Substituents (Nhóm thế vòng) [3i4a5j]")
 sub_options = list(SUB_FRAGS.keys())
 
 col_sb1, col_sb2, col_sb3 = st.sidebar.columns(3)
 with col_sb1:
-    s3 = st.selectbox("Vị trí 3", sub_options, index=sub_options.index("i"), format_func=lambda x: x)
+    s3 = st.selectbox("Vị trí 3", sub_options, index=sub_options.index("i"), format_func=lambda x: x, key="s3")
 with col_sb2:
-    s4 = st.selectbox("Vị trí 4", sub_options, index=sub_options.index("a"), format_func=lambda x: x)
+    s4 = st.selectbox("Vị trí 4", sub_options, index=sub_options.index("a"), format_func=lambda x: x, key="s4")
 with col_sb3:
-    s5 = st.selectbox("Vị trí 5", sub_options, index=sub_options.index("j"), format_func=lambda x: x)
-
-# Tạo mã code tổng hợp
-generated_code = f"{selected_head}{selected_tail}3{s3}4{s4}5{s5}"
+    s5 = st.selectbox("Vị trí 5", sub_options, index=sub_options.index("j"), format_func=lambda x: x, key="s5")
 
 # --- XỬ LÝ LẮP RÁP PHÂN TỬ ---
 
-# B1: Lấy Core
 core_mol = Chem.MolFromSmiles(CORES[selected_head])
-
-# B2: Gắn Tail vào vị trí 9
 tail_smiles = TAIL_FRAGS[selected_tail][0]
 current_mol = attach_fragment(core_mol, 9, tail_smiles)
 
-# B3: Gắn Substituents vào 3, 4, 5
 subs_to_attach = [(3, s3), (4, s4), (5, s5)]
-
 for label, code in subs_to_attach:
     if code == "a":
-        # Nếu là 'a' (Hydro), ta chỉ cần xóa dummy placeholder đi
         current_mol = remove_dummy_label(current_mol, label)
     else:
-        # Nếu là nhóm thế khác, gắn vào
         sub_smiles = SUB_FRAGS[code][0]
         current_mol = attach_fragment(current_mol, label, sub_smiles)
 
-# Clean up và tạo tọa độ 2D đẹp
 try:
     Chem.SanitizeMol(current_mol)
     AllChem.Compute2DCoords(current_mol)
@@ -185,6 +170,7 @@ try:
 except Exception as e:
     st.error(f"Lỗi khi tạo cấu trúc: {e}")
     final_smiles = ""
+    current_mol = None
 
 # --- HIỂN THỊ KẾT QUẢ ---
 
@@ -193,28 +179,52 @@ col1, col2 = st.columns([2, 1])
 with col1:
     st.subheader("Kết quả cấu trúc")
     if current_mol:
-        # Vẽ hình
-        img = Draw.MolToImage(current_mol, size=(600, 400))
-        st.image(img, caption=f"Cấu trúc cho mã: {generated_code}", use_column_width=True)
+        img = Draw.MolToImage(current_mol, size=(600, 450))
+        st.image(img, use_column_width=True)
+    else:
+        st.warning("Không thể tạo hình ảnh cấu trúc.")
     
 with col2:
     st.subheader("Thông tin chi tiết")
-    st.info(f"**Mã định danh:** `{generated_code}`")
     
+    # --- PHẦN MỚI: TẠO MÃ MÀU HIGHLIGHT ---
+    # Định nghĩa màu sắc (tương tự hình ảnh)
+    head_color = "#1f77b4" # Xanh dương
+    tail_color = "#9467bd" # Tím
+    sub_color = "#ff7f0e"  # Cam
+    # Màu nền nhạt tương ứng để làm highlight
+    head_bg = "#e6f2ff"
+    tail_bg = "#f2e6ff"
+    sub_bg = "#fff2e6"
+    
+    # Style chung cho các thẻ span
+    span_style = "padding: 4px 6px; border-radius: 6px; font-weight: 600; font-size: 1.3em;"
+
+    # Tạo chuỗi HTML với highlight
+    highlighted_code = (
+        f'<span style="background-color: {head_bg}; color: {head_color}; {span_style}">{selected_head}</span>'
+        f'<span style="background-color: {tail_bg}; color: {tail_color}; {span_style} margin-left: 4px;">{selected_tail}</span>'
+        f'<span style="background-color: {sub_bg}; color: {sub_color}; {span_style} margin-left: 4px;">3{s3}4{s4}5{s5}</span>'
+    )
+
+    # Hiển thị bằng st.markdown với unsafe_allow_html=True
+    st.markdown(f"### Mã định danh:<br><div style='margin-top: 10px;'>{highlighted_code}</div>", unsafe_allow_html=True)
+    # ---------------------------------------
+
     st.markdown("---")
     st.write("**Thành phần:**")
-    st.write(f"- **Head:** {selected_head}")
-    st.write(f"- **Tail:** {TAIL_FRAGS[selected_tail][1]} ({selected_tail})")
-    st.write(f"- **Sub 3:** {SUB_FRAGS[s3][1]} ({s3})")
-    st.write(f"- **Sub 4:** {SUB_FRAGS[s4][1]} ({s4})")
-    st.write(f"- **Sub 5:** {SUB_FRAGS[s5][1]} ({s5})")
+    # Sử dụng màu sắc tương ứng trong danh sách thành phần để đồng bộ
+    st.markdown(f"- **Head:** <span style='color:{head_color}; font-weight:bold;'>{selected_head}</span>", unsafe_allow_html=True)
+    st.markdown(f"- **Tail:** <span style='color:{tail_color}; font-weight:bold;'>{selected_tail}</span> ({TAIL_FRAGS[selected_tail][1]})", unsafe_allow_html=True)
+    st.markdown(f"- **Sub 3:** <span style='color:{sub_color}; font-weight:bold;'>{s3}</span> ({SUB_FRAGS[s3][1]})", unsafe_allow_html=True)
+    st.markdown(f"- **Sub 4:** <span style='color:{sub_color}; font-weight:bold;'>{s4}</span> ({SUB_FRAGS[s4][1]})", unsafe_allow_html=True)
+    st.markdown(f"- **Sub 5:** <span style='color:{sub_color}; font-weight:bold;'>{s5}</span> ({SUB_FRAGS[s5][1]})", unsafe_allow_html=True)
     
     st.markdown("---")
-    st.text_area("SMILES", value=final_smiles, height=100)
+    with st.expander("Xem SMILES"):
+        st.code(final_smiles, language="text")
 
-# --- KIỂM TRA QUY TẮC (OPTIONAL) ---
+# --- KIỂM TRA QUY TẮC ---
 non_a_count = sum([1 for x in [s3, s4, s5] if x != "a"])
 if non_a_count > 2:
-    st.warning(f"⚠️ **Lưu ý:** Cấu hình này có {non_a_count} nhóm thế khác Hydro. Quy tắc thư viện ban đầu (Max2) chỉ cho phép tối đa 2 nhóm thế.")
-else:
-    st.success("✅ Cấu hình thỏa mãn quy tắc Max-2.")
+    st.warning(f"⚠️ **Lưu ý:** Cấu hình này có {non_a_count} nhóm thế khác Hydro. Quy tắc gốc (Max2) chỉ cho phép tối đa 2.")
